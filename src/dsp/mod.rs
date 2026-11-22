@@ -1,17 +1,18 @@
 pub mod color_filter;
+pub mod color_fx;
 pub mod eq_iso;
 pub mod meter;
 pub mod soft_clip;
 
-use color_filter::ColorFilterChannel;
+use color_fx::{ColorFxMode, SoundColorFx};
 use eq_iso::EqIsoChannel;
 use soft_clip::SoftClipper;
 
 /// Complete stereo Pioneer DJM-A9 Channel Strip DSP processor.
-/// Signal Flow: Input -> Trim -> 3-Band EQ/ISO -> Sound Color FX Filter -> Soft Clipper -> Output
+/// Signal Flow: Input -> Trim -> 3-Band EQ/ISO -> Sound Color FX (6 FX) -> Channel Fader -> Soft Clipper -> Output
 pub struct A9ChannelStripDsp {
     eq_iso: [EqIsoChannel; 2],
-    filter: [ColorFilterChannel; 2],
+    color_fx: SoundColorFx,
     clipper: SoftClipper,
 }
 
@@ -19,10 +20,7 @@ impl A9ChannelStripDsp {
     pub fn new(sample_rate: f64) -> Self {
         Self {
             eq_iso: [EqIsoChannel::new(sample_rate), EqIsoChannel::new(sample_rate)],
-            filter: [
-                ColorFilterChannel::new(sample_rate),
-                ColorFilterChannel::new(sample_rate),
-            ],
+            color_fx: SoundColorFx::new(sample_rate),
             clipper: SoftClipper::new(),
         }
     }
@@ -31,18 +29,14 @@ impl A9ChannelStripDsp {
         for ch in &mut self.eq_iso {
             ch.set_sample_rate(sample_rate);
         }
-        for ch in &mut self.filter {
-            ch.set_sample_rate(sample_rate);
-        }
+        self.color_fx.set_sample_rate(sample_rate);
     }
 
     pub fn reset(&mut self) {
         for ch in &mut self.eq_iso {
             ch.reset();
         }
-        for ch in &mut self.filter {
-            ch.reset();
-        }
+        self.color_fx.reset();
     }
 
     /// Processes a stereo frame `(left, right)` in `f64` precision.
@@ -58,9 +52,10 @@ impl A9ChannelStripDsp {
         mid_pos: f64,
         high_pos: f64,
         iso_mode: bool,
-        filter_pos: f64,
-        filter_res: f64,
-        filter_enabled: bool,
+        cfx_mode: ColorFxMode,
+        color_pos: f64,
+        color_param: f64,
+        cfx_enabled: bool,
         fader_gain: f64,
         soft_clip_enabled: bool,
     ) -> (f64, f64, f64, f64) {
@@ -72,9 +67,10 @@ impl A9ChannelStripDsp {
         let l2 = self.eq_iso[0].process(l1, low_pos, mid_pos, high_pos, iso_mode);
         let r2 = self.eq_iso[1].process(r1, low_pos, mid_pos, high_pos, iso_mode);
 
-        // 3. Sound Color FX: Filter
-        let l3 = self.filter[0].process(l2, filter_pos, filter_res, filter_enabled);
-        let r3 = self.filter[1].process(r2, filter_pos, filter_res, filter_enabled);
+        // 3. Sound Color FX (Space, Dub Echo, Sweep, Noise, Crush, Filter)
+        let (l3, r3) =
+            self.color_fx
+                .process_stereo(l2, r2, cfx_mode, color_pos, color_param, cfx_enabled);
 
         // 4. Channel Fader
         let l4 = l3 * fader_gain;
@@ -94,6 +90,7 @@ impl A9ChannelStripDsp {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dsp::color_filter::ColorFilterChannel;
     use std::f64::consts::PI;
 
     fn measure_sine_gain_db(
@@ -251,5 +248,38 @@ mod tests {
             res_at_fc > flat_at_fc + 6.0,
             "High PARAMETER resonance should boost cutoff: flat={flat_at_fc:.2} dB, res={res_at_fc:.2} dB"
         );
+    }
+
+    #[test]
+    fn all_six_sound_color_fx_are_stable_and_responsive() {
+        let sr = 48000.0;
+        let modes = [
+            ColorFxMode::Space,
+            ColorFxMode::DubEcho,
+            ColorFxMode::Sweep,
+            ColorFxMode::Noise,
+            ColorFxMode::Crush,
+            ColorFxMode::Filter,
+        ];
+
+        for mode in modes {
+            let mut cfx = SoundColorFx::new(sr);
+            let mut max_out = 0.0_f64;
+            let n = 12000;
+            for i in 0..n {
+                let t = i as f64 / n as f64;
+                let color = -1.0 + 2.0 * t;
+                let x = (2.0 * PI * 440.0 * (i as f64 / sr)).sin() * 0.4;
+                let (ol, or) = cfx.process_stereo(x, x, mode, color, 0.85, true);
+                assert!(ol.is_finite() && or.is_finite(), "NaN/Inf in {:?}", mode);
+                assert!(
+                    ol.abs() < 25.0 && or.abs() < 25.0,
+                    "Blow-up in {:?}: ol={ol}, or={or}",
+                    mode
+                );
+                max_out = max_out.max(ol.abs()).max(or.abs());
+            }
+            assert!(max_out > 0.1, "No output from {:?}", mode);
+        }
     }
 }

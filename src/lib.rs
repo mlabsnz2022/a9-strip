@@ -73,7 +73,8 @@ impl Plugin for A9Strip {
         _context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
         let iso_mode = self.params.eq_mode.value() == EqMode::Isolator;
-        let filter_on = self.params.filter_on.value();
+        let cfx_mode = self.params.cfx_type.value().into();
+        let cfx_on = self.params.filter_on.value();
         let soft_clip_on = self.params.soft_clip.value();
 
         let mut block_peak = 0.0_f64;
@@ -84,8 +85,8 @@ impl Plugin for A9Strip {
             let eq_hi = self.params.eq_hi.smoothed.next() as f64;
             let eq_mid = self.params.eq_mid.smoothed.next() as f64;
             let eq_low = self.params.eq_low.smoothed.next() as f64;
-            let filter_pos = self.params.filter.smoothed.next() as f64;
-            let filter_res = self.params.filter_res.smoothed.next() as f64;
+            let color_pos = self.params.filter.smoothed.next() as f64;
+            let color_param = self.params.filter_res.smoothed.next() as f64;
             let fader_gain = fader_to_gain(self.params.fader.smoothed.next());
 
             let mut iter = channel_samples.iter_mut();
@@ -101,9 +102,10 @@ impl Plugin for A9Strip {
                     eq_mid,
                     eq_hi,
                     iso_mode,
-                    filter_pos,
-                    filter_res,
-                    filter_on,
+                    cfx_mode,
+                    color_pos,
+                    color_param,
+                    cfx_on,
                     fader_gain,
                     soft_clip_on,
                 );

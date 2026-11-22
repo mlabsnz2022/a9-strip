@@ -1,11 +1,11 @@
 pub mod widgets;
 
 use crate::dsp::meter::MeterState;
-use crate::params::{A9StripParams, EqMode};
+use crate::params::{A9StripParams, ColorFxType, EqMode};
 use nih_plug::prelude::*;
 use nih_plug_egui::egui::{
-    self, Color32, ColorImage, CornerRadius, FontId, Frame, Margin, Stroke, TextureHandle,
-    TextureOptions, Vec2,
+    self, Align2, Color32, ColorImage, CornerRadius, FontId, Frame, Margin, Pos2, Sense, Stroke,
+    StrokeKind, TextureHandle, TextureOptions, Vec2,
 };
 use nih_plug_egui::create_egui_editor;
 use std::sync::Arc;
@@ -169,7 +169,7 @@ pub fn create(
                                             "HI",
                                             cut_mark,
                                             "+6",
-                                            40.0,
+                                            38.0,
                                             true,
                                             KnobStyle::Eq,
                                             false,
@@ -181,7 +181,7 @@ pub fn create(
                                             "MID",
                                             cut_mark,
                                             "+6",
-                                            40.0,
+                                            38.0,
                                             true,
                                             KnobStyle::Eq,
                                             false,
@@ -193,7 +193,7 @@ pub fn create(
                                             "LOW",
                                             cut_mark,
                                             "+6",
-                                            40.0,
+                                            38.0,
                                             true,
                                             KnobStyle::Eq,
                                             false,
@@ -201,68 +201,172 @@ pub fn create(
                                     });
                                 });
 
-                            // --- 3. SOUND COLOR FX: FILTER SECTION ---
+                            // --- 3. SOUND COLOR FX (ALL 6 DJM-A9 EFFECTS) ---
                             Frame::NONE
                                 .fill(BG_PANEL)
                                 .corner_radius(CornerRadius::same(5))
                                 .stroke(Stroke::new(1.0_f32, BORDER_SUBTLE))
-                                .inner_margin(Margin::symmetric(8, 6))
+                                .inner_margin(Margin::symmetric(8, 5))
                                 .show(ui, |ui| {
                                     ui.vertical_centered(|ui| {
-                                        ui.spacing_mut().item_spacing.y = 4.0;
+                                        ui.spacing_mut().item_spacing.y = 3.0;
 
-                                        ui.label(
-                                            egui::RichText::new("SOUND COLOR FX")
-                                                .font(FontId::proportional(9.0))
-                                                .strong()
-                                                .color(TEXT_MUTED),
-                                        );
-
-                                        // Filter On/Off + Center Lock row
                                         ui.horizontal(|ui| {
-                                            illuminated_button(
-                                                ui,
-                                                &params.filter_on,
-                                                setter,
-                                                "FILTER",
-                                                PIONEER_BLUE,
-                                                Vec2::new(88.0, 20.0),
+                                            ui.label(
+                                                egui::RichText::new("SOUND COLOR FX")
+                                                    .font(FontId::proportional(8.5))
+                                                    .strong()
+                                                    .color(TEXT_MUTED),
                                             );
-                                            ui.add_space(6.0);
-                                            illuminated_button(
-                                                ui,
-                                                &params.center_lock,
-                                                setter,
-                                                "CTR LOCK",
-                                                PIONEER_AMBER,
-                                                Vec2::new(96.0, 20.0),
+                                            ui.with_layout(
+                                                egui::Layout::right_to_left(egui::Align::Center),
+                                                |ui| {
+                                                    illuminated_button(
+                                                        ui,
+                                                        &params.center_lock,
+                                                        setter,
+                                                        "CTR LOCK",
+                                                        PIONEER_AMBER,
+                                                        Vec2::new(82.0, 17.0),
+                                                    );
+                                                },
                                             );
                                         });
 
-                                        // Signature large center-zero FILTER knob
+                                        // 6-button DJM-A9 Sound Color FX 2x3 selector grid
+                                        let cur_fx = params.cfx_type.value();
+                                        let cfx_on = params.filter_on.modulated_plain_value();
+
+                                        let rows: [[(ColorFxType, &str); 2]; 3] = [
+                                            [
+                                                (ColorFxType::Space, "SPACE"),
+                                                (ColorFxType::DubEcho, "DUB ECHO"),
+                                            ],
+                                            [
+                                                (ColorFxType::Sweep, "SWEEP"),
+                                                (ColorFxType::Noise, "NOISE"),
+                                            ],
+                                            [
+                                                (ColorFxType::Crush, "CRUSH"),
+                                                (ColorFxType::Filter, "FILTER"),
+                                            ],
+                                        ];
+
+                                        for row in rows {
+                                            ui.horizontal(|ui| {
+                                                ui.spacing_mut().item_spacing.x = 4.0;
+                                                for (fx_type, label) in row {
+                                                    let is_active = cfx_on && cur_fx == fx_type;
+                                                    let (rect, resp) = ui.allocate_exact_size(
+                                                        Vec2::new(93.0, 18.0),
+                                                        Sense::click(),
+                                                    );
+
+                                                    if resp.clicked() {
+                                                        if is_active {
+                                                            // Clicking active FX button toggles Sound Color FX off (authentic DJM-A9 behavior)
+                                                            setter.begin_set_parameter(&params.filter_on);
+                                                            setter.set_parameter(&params.filter_on, false);
+                                                            setter.end_set_parameter(&params.filter_on);
+                                                        } else {
+                                                            setter.begin_set_parameter(&params.cfx_type);
+                                                            setter.set_parameter(&params.cfx_type, fx_type);
+                                                            setter.end_set_parameter(&params.cfx_type);
+                                                            if !cfx_on {
+                                                                setter.begin_set_parameter(&params.filter_on);
+                                                                setter.set_parameter(&params.filter_on, true);
+                                                                setter.end_set_parameter(&params.filter_on);
+                                                            }
+                                                        }
+                                                    }
+
+                                                    let painter = ui.painter();
+                                                    let bg = if is_active {
+                                                        Color32::from_rgba_unmultiplied(
+                                                            PIONEER_BLUE.r(),
+                                                            PIONEER_BLUE.g(),
+                                                            PIONEER_BLUE.b(),
+                                                            44,
+                                                        )
+                                                    } else {
+                                                        Color32::from_rgb(22, 24, 29)
+                                                    };
+                                                    let border = if is_active {
+                                                        PIONEER_BLUE
+                                                    } else if resp.hovered() {
+                                                        Color32::from_rgb(100, 106, 120)
+                                                    } else {
+                                                        BORDER_SUBTLE
+                                                    };
+                                                    let text_col = if is_active {
+                                                        PIONEER_BLUE
+                                                    } else {
+                                                        TEXT_MUTED
+                                                    };
+
+                                                    painter.rect_filled(rect, 3.0, bg);
+                                                    painter.rect_stroke(
+                                                        rect,
+                                                        3.0,
+                                                        Stroke::new(1.1_f32, border),
+                                                        StrokeKind::Inside,
+                                                    );
+
+                                                    let led_pos =
+                                                        Pos2::new(rect.left() + 8.0, rect.center().y);
+                                                    painter.circle_filled(
+                                                        led_pos,
+                                                        2.4,
+                                                        if is_active {
+                                                            PIONEER_BLUE
+                                                        } else {
+                                                            Color32::from_rgb(46, 50, 58)
+                                                        },
+                                                    );
+                                                    painter.text(
+                                                        Pos2::new(rect.center().x + 4.0, rect.center().y),
+                                                        Align2::CENTER_CENTER,
+                                                        label,
+                                                        FontId::proportional(9.0),
+                                                        text_col,
+                                                    );
+                                                }
+                                            });
+                                        }
+
+                                        let (left_mark, right_mark, param_label) = match cur_fx {
+                                            ColorFxType::Space => ("LOW", "HIGH", "PARAMETER (FB)"),
+                                            ColorFxType::DubEcho => ("MID", "HIGH", "PARAMETER (FB)"),
+                                            ColorFxType::Sweep => ("NOTCH", "BAND", "PARAMETER (FREQ)"),
+                                            ColorFxType::Noise => ("DARK", "BRIGHT", "PARAMETER (VOL)"),
+                                            ColorFxType::Crush => ("CRUSH", "HPF", "PARAMETER (GRIT)"),
+                                            ColorFxType::Filter => ("LPF", "HPF", "PARAMETER (RES)"),
+                                        };
+
+                                        // Signature large center-zero COLOR knob
                                         let lock_enabled = params.center_lock.modulated_plain_value();
                                         pioneer_knob(
                                             ui,
                                             &params.filter,
                                             setter,
-                                            "COLOR / FILTER",
-                                            "LPF",
-                                            "HPF",
-                                            50.0,
+                                            "COLOR",
+                                            left_mark,
+                                            right_mark,
+                                            46.0,
                                             true,
                                             KnobStyle::ColorFilter,
                                             lock_enabled,
                                         );
 
-                                        // PARAMETER (Resonance) knob
+                                        // PARAMETER knob
                                         pioneer_knob(
                                             ui,
                                             &params.filter_res,
                                             setter,
-                                            "PARAMETER (RES)",
+                                            param_label,
                                             "MIN",
                                             "MAX",
-                                            34.0,
+                                            32.0,
                                             false,
                                             KnobStyle::Utility,
                                             false,

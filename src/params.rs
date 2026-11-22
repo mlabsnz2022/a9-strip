@@ -1,3 +1,4 @@
+use crate::dsp::color_fx::ColorFxMode;
 use nih_plug::prelude::*;
 use nih_plug_egui::EguiState;
 use std::sync::Arc;
@@ -8,6 +9,35 @@ pub enum EqMode {
     Isolator,
     #[name = "EQ"]
     Eq,
+}
+
+#[derive(Enum, Debug, PartialEq, Eq, Clone, Copy)]
+pub enum ColorFxType {
+    #[name = "SPACE"]
+    Space,
+    #[name = "DUB ECHO"]
+    DubEcho,
+    #[name = "SWEEP"]
+    Sweep,
+    #[name = "NOISE"]
+    Noise,
+    #[name = "CRUSH"]
+    Crush,
+    #[name = "FILTER"]
+    Filter,
+}
+
+impl From<ColorFxType> for ColorFxMode {
+    fn from(value: ColorFxType) -> Self {
+        match value {
+            ColorFxType::Space => ColorFxMode::Space,
+            ColorFxType::DubEcho => ColorFxMode::DubEcho,
+            ColorFxType::Sweep => ColorFxMode::Sweep,
+            ColorFxType::Noise => ColorFxMode::Noise,
+            ColorFxType::Crush => ColorFxMode::Crush,
+            ColorFxType::Filter => ColorFxMode::Filter,
+        }
+    }
 }
 
 /// Maps bipolar Trim knob position (`-1.0..=1.0`, center `0.0 = 0 dB`) to linear gain.
@@ -62,15 +92,19 @@ pub struct A9StripParams {
     #[id = "eq_low"]
     pub eq_low: FloatParam,
 
-    /// Sound Color FX Filter Enable button.
+    /// Selected Sound Color FX (Space, Dub Echo, Sweep, Noise, Crush, Filter).
+    #[id = "cfx_type"]
+    pub cfx_type: EnumParam<ColorFxType>,
+
+    /// Sound Color FX Enable button.
     #[id = "filter_on"]
     pub filter_on: BoolParam,
 
-    /// Center-zero Filter knob (`-1.0` LPF .. `0.0` Bypass .. `+1.0` HPF).
+    /// Center-zero Sound Color FX knob (`-1.0` CCW .. `0.0` Bypass .. `+1.0` CW).
     #[id = "filter"]
     pub filter: FloatParam,
 
-    /// Sound Color FX Parameter knob (Filter Resonance / Q, `0.0..=1.0`).
+    /// Sound Color FX Parameter knob (`0.0..=1.0`).
     #[id = "filter_res"]
     pub filter_res: FloatParam,
 
@@ -102,7 +136,7 @@ impl Default for A9StripParams {
         });
 
         Self {
-            editor_state: EguiState::from_size(330, 680),
+            editor_state: EguiState::from_size(330, 740),
 
             trim: FloatParam::new(
                 "Trim",
@@ -162,10 +196,12 @@ impl Default for A9StripParams {
             .with_smoother(SmoothingStyle::Linear(6.0))
             .with_value_to_string(eq_formatter),
 
-            filter_on: BoolParam::new("Filter On", true),
+            cfx_type: EnumParam::new("Sound Color FX", ColorFxType::Filter),
+
+            filter_on: BoolParam::new("Color FX On", true),
 
             filter: FloatParam::new(
-                "Filter",
+                "Color",
                 0.0,
                 FloatRange::Linear {
                     min: -1.0,
@@ -176,27 +212,13 @@ impl Default for A9StripParams {
             .with_value_to_string(Arc::new(|v| {
                 if v.abs() <= 0.005 {
                     "CENTER".to_string()
-                } else if v < 0.0 {
-                    let t = (-v as f64).clamp(0.0, 1.0);
-                    let hz = 20000.0 * (25.0_f64 / 20000.0).powf(t);
-                    if hz >= 1000.0 {
-                        format!("LPF {:.1} kHz", hz / 1000.0)
-                    } else {
-                        format!("LPF {:.0} Hz", hz)
-                    }
                 } else {
-                    let t = (v as f64).clamp(0.0, 1.0);
-                    let hz = 20.0 * (18000.0_f64 / 20.0).powf(t);
-                    if hz >= 1000.0 {
-                        format!("HPF {:.1} kHz", hz / 1000.0)
-                    } else {
-                        format!("HPF {:.0} Hz", hz)
-                    }
+                    format!("{:+.0}%", v * 100.0)
                 }
             })),
 
             filter_res: FloatParam::new(
-                "Parameter (Resonance)",
+                "Parameter",
                 0.35,
                 FloatRange::Linear { min: 0.0, max: 1.0 },
             )
