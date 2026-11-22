@@ -1,0 +1,29 @@
+[workspace]
+members = ["xtask"]
+resolver = "2"
+
+[package]
+name = "a9_strip"
+version = "0.1.0"
+edition = "2021"
+authors = ["m-labs"]
+license = "MIT"
+description = "Pioneer DJM-A9 Channel Strip VST3/CLAP plugin (Trim, 3-Band EQ/Isolator, Sound Color FX Filter + Resonance + Center Lock, Subtle Soft Clipper)"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", features = ["assert_process_allocs"] }
+nih_plug_egui = { git = "https://github.com/robbert-vdh/nih-plug.git" }
+atomic_float = "1"
+png = "0.17"
+
+[profile.release]
+lto = "thin"
+strip = "symbols"
+
+[profile.profiling]
+inherits = "release"
+debug = true
+strip = "none"
