@@ -55,15 +55,17 @@ The compiled plugin bundles will be created at:
 - `target/bundled/A9 Strip.vst3`
 - `target/bundled/A9 Strip.clap`
 
-## Installing on Windows
+## Installing
 
-Copy `target/bundled/A9 Strip.vst3` into your system VST3 folder:
-```powershell
-New-Item -ItemType Directory -Force "C:\Program Files\Common Files\VST3" | Out-Null
-Copy-Item -Recurse -Force "target\bundled\A9 Strip.vst3" "C:\Program Files\Common Files\VST3\"
-```
+Download the latest installer from [**GitHub Releases**](https://github.com/mlabsnz2022/a9-strip/releases):
 
-*(Optional)* For CLAP-compatible DAWs (Bitwig, Reaper, FL Studio, etc.), copy `target/bundled/A9 Strip.clap` to `C:\Program Files\Common Files\CLAP\`.
+### Windows
+- Run **`A9-Strip-vX.X.X-Windows-Setup.exe`** (automatically installs VST3 to `C:\Program Files\Common Files\VST3\` and optionally CLAP to `C:\Program Files\Common Files\CLAP\`).
+- Or manually copy `target/bundled/A9 Strip.vst3` into `C:\Program Files\Common Files\VST3\`.
+
+### macOS (Apple Silicon & Intel Universal)
+- Run **`A9-Strip-vX.X.X-macOS-Universal.pkg`** (installs VST3 to `/Library/Audio/Plug-Ins/VST3` and CLAP to `/Library/Audio/Plug-Ins/CLAP`).
+- *Note:* Because this open-source build is ad-hoc signed, if macOS Gatekeeper prompts on first launch, **Right-Click → Open** the `.pkg` (or allow it under **System Settings → Privacy & Security**).
 
 Rescan plugins in your DAW and load **A9 Strip**.
 

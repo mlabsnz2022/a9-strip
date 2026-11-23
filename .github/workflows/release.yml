@@ -1,4 +1,4 @@
-name: Release Windows Installer
+name: Release Windows & macOS Installers
 
 on:
   push:
@@ -10,7 +10,27 @@ permissions:
   contents: write
 
 jobs:
+  meta:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: meta
+        run: |
+          TAG="${{ github.ref_name }}"
+          if [[ "$TAG" =~ ^v(.+)$ ]]; then
+            VER="${BASH_REMATCH[1]}"
+          else
+            VER=$(grep -m1 '^version' Cargo.toml | sed -E 's/version *= *"([^"]+)"/\1/')
+            TAG="v${VER}"
+          fi
+          echo "version=${VER}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
   build-windows:
+    needs: meta
     runs-on: windows-latest
     steps:
       - name: Checkout repository
@@ -28,20 +48,6 @@ jobs:
       - name: Build release VST3 & CLAP bundles
         run: cargo xtask bundle a9_strip --release
 
-      - name: Extract version
-        id: meta
-        shell: pwsh
-        run: |
-          $tag = "${{ github.ref_name }}"
-          if ($tag -match '^v(.+)$') {
-            $ver = $Matches[1]
-          } else {
-            $ver = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1).Matches.Groups[1].Value
-            $tag = "v$ver"
-          }
-          "version=$ver" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-
       - name: Build Windows Installer (Inno Setup)
         shell: pwsh
         run: |
@@ -49,33 +55,127 @@ jobs:
           if (-not (Test-Path $iscc)) {
             choco install innosetup -y
           }
-          & $iscc "/DMyAppVersion=${{ steps.meta.outputs.version }}" "installer\a9_strip.iss"
+          & $iscc "/DMyAppVersion=${{ needs.meta.outputs.version }}" "installer\a9_strip.iss"
 
-      - name: Create Portable ZIP
+      - name: Create Windows Portable ZIP
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force "target\installer" | Out-Null
           Compress-Archive -Force `
             -Path "target\bundled\A9 Strip.vst3", "target\bundled\A9 Strip.clap", "README.md", "LICENSE" `
-            -DestinationPath "target\installer\A9-Strip-v${{ steps.meta.outputs.version }}-Windows-Portable.zip"
+            -DestinationPath "target\installer\A9-Strip-v${{ needs.meta.outputs.version }}-Windows-Portable.zip"
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release
+          path: |
+            target/installer/A9-Strip-v${{ needs.meta.outputs.version }}-Windows-Setup.exe
+            target/installer/A9-Strip-v${{ needs.meta.outputs.version }}-Windows-Portable.zip
+
+  build-macos:
+    needs: meta
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable toolchain (Apple Silicon + Intel)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run DSP unit tests
+        run: cargo test
+
+      - name: Build Universal macOS VST3 & CLAP bundles
+        run: cargo xtask bundle-universal a9_strip --release
+
+      - name: Ad-hoc sign bundles & build macOS Universal .pkg installer
+        run: |
+          VER="${{ needs.meta.outputs.version }}"
+          mkdir -p target/installer/pkg_stage target/installer/vst3_root target/installer/clap_root
+
+          # Ad-hoc sign so Apple Silicon Macs accept the bundles
+          codesign --force --deep --sign - "target/bundled/A9 Strip.vst3"
+          codesign --force --deep --sign - "target/bundled/A9 Strip.clap"
+
+          cp -R "target/bundled/A9 Strip.vst3" target/installer/vst3_root/
+          cp -R "target/bundled/A9 Strip.clap" target/installer/clap_root/
+
+          pkgbuild \
+            --root target/installer/vst3_root \
+            --install-location "/Library/Audio/Plug-Ins/VST3" \
+            --identifier "com.mlabs.a9strip.vst3" \
+            --version "${VER}" \
+            target/installer/pkg_stage/a9_strip_vst3.pkg
+
+          pkgbuild \
+            --root target/installer/clap_root \
+            --install-location "/Library/Audio/Plug-Ins/CLAP" \
+            --identifier "com.mlabs.a9strip.clap" \
+            --version "${VER}" \
+            target/installer/pkg_stage/a9_strip_clap.pkg
+
+          cp LICENSE target/installer/pkg_stage/LICENSE
+          sed "s/VERSION_PLACEHOLDER/${VER}/g" installer/macos_distribution.xml > target/installer/pkg_stage/distribution.xml
+
+          productbuild \
+            --distribution target/installer/pkg_stage/distribution.xml \
+            --package-path target/installer/pkg_stage \
+            --resources target/installer/pkg_stage \
+            "target/installer/A9-Strip-v${VER}-macOS-Universal.pkg"
+
+          # Also create portable ZIP
+          ditto -c -k --sequesterRsrc "target/bundled" "target/installer/A9-Strip-v${VER}-macOS-Universal-Portable.zip"
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-release
+          path: |
+            target/installer/A9-Strip-v${{ needs.meta.outputs.version }}-macOS-Universal.pkg
+            target/installer/A9-Strip-v${{ needs.meta.outputs.version }}-macOS-Universal-Portable.zip
+
+  publish-release:
+    needs: [meta, build-windows, build-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-release
+          path: release-assets
+
+      - name: Download macOS artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-release
+          path: release-assets
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.meta.outputs.tag }}
-          name: "A9 Strip ${{ steps.meta.outputs.tag }}"
+          tag_name: ${{ needs.meta.outputs.tag }}
+          name: "A9 Strip ${{ needs.meta.outputs.tag }}"
           generate_release_notes: true
           body: |
-            ## A9 Strip ${{ steps.meta.outputs.tag }} — Pioneer DJM-A9 Channel Strip (VST3 / CLAP)
+            ## A9 Strip ${{ needs.meta.outputs.tag }} — Pioneer DJM-A9 Channel Strip (VST3 / CLAP)
 
-            ### Downloads
-            - **`A9-Strip-v${{ steps.meta.outputs.version }}-Windows-Setup.exe`** — Standard Windows installer (automatically installs VST3 to `C:\Program Files\Common Files\VST3` and optionally CLAP to `C:\Program Files\Common Files\CLAP`, with uninstaller).
-            - **`A9-Strip-v${{ steps.meta.outputs.version }}-Windows-Portable.zip`** — Portable zip for manual installation.
+            ### Windows Downloads
+            - **`A9-Strip-v${{ needs.meta.outputs.version }}-Windows-Setup.exe`** — Windows installer (installs VST3 to `C:\Program Files\Common Files\VST3` and optionally CLAP to `C:\Program Files\Common Files\CLAP`, with uninstaller).
+            - **`A9-Strip-v${{ needs.meta.outputs.version }}-Windows-Portable.zip`** — Portable archive for manual installation.
+
+            ### macOS Downloads (Universal: Apple Silicon & Intel)
+            - **`A9-Strip-v${{ needs.meta.outputs.version }}-macOS-Universal.pkg`** — Native macOS installer (installs VST3 to `/Library/Audio/Plug-Ins/VST3` and CLAP to `/Library/Audio/Plug-Ins/CLAP`).
+              > *Note: This open-source build is ad-hoc signed (not Apple notarized). If macOS Gatekeeper blocks the installer, **Right-Click → Open** the `.pkg` file (or allow it in **System Settings → Privacy & Security**).*
+            - **`A9-Strip-v${{ needs.meta.outputs.version }}-macOS-Universal-Portable.zip`** — Portable archive for manual installation.
 
             ### Highlights
             - Exact Pioneer DJM-A9 signal flow: **Trim → 3-Band EQ/Isolator → Sound Color FX → Channel Fader → Soft Clipper**
             - **All 6 DJM-A9 Sound Color FX:** `SPACE`, `DUB ECHO`, `SWEEP`, `NOISE`, `CRUSH`, and `FILTER` with `PARAMETER` knob & `CTR LOCK`
             - 64-bit internal floating-point DSP (`f64`) with zero audio-thread allocations
-          files: |
-            target/installer/A9-Strip-v${{ steps.meta.outputs.version }}-Windows-Setup.exe
-            target/installer/A9-Strip-v${{ steps.meta.outputs.version }}-Windows-Portable.zip
+          files: release-assets/*
