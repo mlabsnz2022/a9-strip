@@ -157,25 +157,35 @@ jobs:
           path: release-assets
 
       - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ needs.meta.outputs.tag }}
-          name: "A9 Strip ${{ needs.meta.outputs.tag }}"
-          generate_release_notes: true
-          body: |
-            ## A9 Strip ${{ needs.meta.outputs.tag }} — Pioneer DJM-A9 Channel Strip (VST3 / CLAP)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.meta.outputs.tag }}
+          VER: ${{ needs.meta.outputs.version }}
+        run: |
+          cat <<EOF > release_notes.md
+          ## A9 Strip ${TAG} — Pioneer DJM-A9 Channel Strip (VST3 / CLAP)
 
-            ### Windows Downloads
-            - **`A9-Strip-v${{ needs.meta.outputs.version }}-Windows-Setup.exe`** — Windows installer (installs VST3 to `C:\Program Files\Common Files\VST3` and optionally CLAP to `C:\Program Files\Common Files\CLAP`, with uninstaller).
-            - **`A9-Strip-v${{ needs.meta.outputs.version }}-Windows-Portable.zip`** — Portable archive for manual installation.
+          ### Windows Downloads
+          - **\`A9-Strip-v${VER}-Windows-Setup.exe\`** — Windows installer (installs VST3 to \`C:\Program Files\Common Files\VST3\` and optionally CLAP to \`C:\Program Files\Common Files\CLAP\`, with uninstaller).
+          - **\`A9-Strip-v${VER}-Windows-Portable.zip\`** — Portable archive for manual installation.
 
-            ### macOS Downloads (Universal: Apple Silicon & Intel)
-            - **`A9-Strip-v${{ needs.meta.outputs.version }}-macOS-Universal.pkg`** — Native macOS installer (installs VST3 to `/Library/Audio/Plug-Ins/VST3` and CLAP to `/Library/Audio/Plug-Ins/CLAP`).
-              > *Note: This open-source build is ad-hoc signed (not Apple notarized). If macOS Gatekeeper blocks the installer, **Right-Click → Open** the `.pkg` file (or allow it in **System Settings → Privacy & Security**).*
-            - **`A9-Strip-v${{ needs.meta.outputs.version }}-macOS-Universal-Portable.zip`** — Portable archive for manual installation.
+          ### macOS Downloads (Universal: Apple Silicon & Intel)
+          - **\`A9-Strip-v${VER}-macOS-Universal.pkg\`** — Native macOS installer (installs VST3 to \`/Library/Audio/Plug-Ins/VST3\` and CLAP to \`/Library/Audio/Plug-Ins/CLAP\`).
+            > *Note: This open-source build is ad-hoc signed (not Apple notarized). If macOS Gatekeeper blocks the installer, **Right-Click → Open** the \`.pkg\` file (or allow it in **System Settings → Privacy & Security**).*
+          - **\`A9-Strip-v${VER}-macOS-Universal-Portable.zip\`** — Portable archive for manual installation.
 
-            ### Highlights
-            - Exact Pioneer DJM-A9 signal flow: **Trim → 3-Band EQ/Isolator → Sound Color FX → Channel Fader → Soft Clipper**
-            - **All 6 DJM-A9 Sound Color FX:** `SPACE`, `DUB ECHO`, `SWEEP`, `NOISE`, `CRUSH`, and `FILTER` with `PARAMETER` knob & `CTR LOCK`
-            - 64-bit internal floating-point DSP (`f64`) with zero audio-thread allocations
-          files: release-assets/*
+          ### Highlights
+          - Exact Pioneer DJM-A9 signal flow: **Trim → 3-Band EQ/Isolator → Sound Color FX → Channel Fader → Soft Clipper**
+          - **All 6 DJM-A9 Sound Color FX:** \`SPACE\`, \`DUB ECHO\`, \`SWEEP\`, \`NOISE\`, \`CRUSH\`, and \`FILTER\` with \`PARAMETER\` knob & \`CTR LOCK\`
+          - 64-bit internal floating-point DSP (\`f64\`) with zero audio-thread allocations
+          EOF
+
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            gh release edit "${TAG}" --title "A9 Strip ${TAG}" --notes-file release_notes.md
+            gh release upload "${TAG}" release-assets/* --clobber
+          else
+            gh release create "${TAG}" release-assets/* \
+              --title "A9 Strip ${TAG}" \
+              --notes-file release_notes.md
+          fi
